@@ -430,4 +430,29 @@ int64_t phi(int64_t x,
   return sum;
 }
 
+void generate_pi_hyperbolic(int64_t n,
+                            int64_t k,
+                            int64_t *pi_buf,
+                            int64_t *pi_hyperbolic_buf)
+{
+  int64_t sqrtn = isqrt(n);
+  PiTable pi(n / k, 1);
+  auto primes = generate_n_primes<int32_t>(pi[isqrt(n)]);
+  PhiCache cache(n, pi[sqrtn], primes, pi);
+
+  for (int64_t i = 0; i < sqrtn; i++) {
+    pi_buf[i] = pi[i+1];
+  }
+
+  int64_t i = 0;
+  for (; i < k; i++) {
+    int64_t m = n / (i + 1);
+    int64_t sqrtm = isqrt(m);
+    pi_hyperbolic_buf[i] = cache.phi<1>(m, pi[sqrtm]) + pi[sqrtm] - 1;
+  }
+  for (; i < sqrtn; i++) {
+    pi_hyperbolic_buf[i] = pi[n / (i + 1)];
+  }
+}
+
 } // namespace

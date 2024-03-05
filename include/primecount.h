@@ -91,6 +91,8 @@ void primecount_set_num_threads(int num_threads);
 /* Get the primecount version number, in the form “i.j” */
 const char* primecount_version(void);
 
+void primecount_generate_pi_hyperbolic(int64_t n, int64_t k, int64_t *pi_buf, int64_t *pi_hyperbolic_buf);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
