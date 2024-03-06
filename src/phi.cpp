@@ -37,6 +37,7 @@
 
 #include <stdint.h>
 #include <algorithm>
+#include <iostream>
 #include <cmath>
 #include <utility>
 
@@ -437,7 +438,7 @@ void generate_pi_hyperbolic(int64_t n,
 {
   int64_t sqrtn = isqrt(n);
   PiTable pi(n / k, 1);
-  auto primes = generate_n_primes<int32_t>(pi[isqrt(n)]);
+  auto primes = generate_n_primes<int32_t>(pi[sqrtn]);
   PhiCache cache(n, pi[sqrtn], primes, pi);
 
   for (int64_t i = 0; i < sqrtn; i++) {
@@ -452,6 +453,26 @@ void generate_pi_hyperbolic(int64_t n,
   }
   for (; i < sqrtn; i++) {
     pi_hyperbolic_buf[i] = pi[n / (i + 1)];
+  }
+}
+
+void generate_phi(int64_t n, int64_t max_a, int64_t *buf) {
+  int64_t sqrtn = isqrt(n);
+  PiTable pi_table(sqrtn, 1);
+  auto primes = generate_n_primes<int32_t>(pi_table[sqrtn]);
+  PhiCache cache(n, pi_table[sqrtn], primes, pi_table);
+
+  int64_t pi_n = pi(n);
+  for (int64_t i = 0; i <= max_a; i++) {
+    if (i == 0) {
+      buf[i] = n;
+    } else if (i <= pi_table[sqrtn]) {
+      buf[i] = buf[i - 1] - cache.phi<1>(n / primes[i], i - 1);
+    } else if (i <= pi_n) {
+      buf[i] = pi_n - i + 1;
+    } else {
+      buf[i] = 1;
+    }
   }
 }
 

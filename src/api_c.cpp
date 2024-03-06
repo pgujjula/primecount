@@ -109,6 +109,18 @@ void primecount_generate_pi_hyperbolic(int64_t n, int64_t k, int64_t *pi_buf, in
   }
 }
 
+void primecount_generate_phi(int64_t n, int64_t max_a, int64_t *buf)
+{
+  try
+  {
+    primecount::generate_phi(n, max_a, buf);
+  }
+  catch(const std::exception& e)
+  {
+    std::cerr << "primecount_generate_phi: " << e.what() << std::endl;
+  }
+}
+
 int primecount_get_num_threads(void)
 {
   try

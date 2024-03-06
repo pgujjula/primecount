@@ -92,6 +92,7 @@ void primecount_set_num_threads(int num_threads);
 const char* primecount_version(void);
 
 void primecount_generate_pi_hyperbolic(int64_t n, int64_t k, int64_t *pi_buf, int64_t *pi_hyperbolic_buf);
+void primecount_generate_phi(int64_t n, int64_t max_a, int64_t *buf);
 
 #ifdef __cplusplus
 } /* extern "C" */

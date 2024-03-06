@@ -62,6 +62,7 @@ std::string pi(const std::string& x);
 int64_t phi(int64_t x, int64_t a);
 
 void generate_pi_hyperbolic(int64_t n, int64_t k, int64_t *pi_buf, int64_t *pi_hyperbolic_buf);
+void generate_phi(int64_t n, int64_t max_a, int64_t *buf);
 
 /// Find the nth prime using a combination of the prime counting
 /// function and the sieve of Eratosthenes.
