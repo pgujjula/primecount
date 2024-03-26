@@ -33,26 +33,57 @@
 
 namespace {
 
+/// Calculate an initial nth prime approximation using Cesàro's formula.
+/// Cesàro, Ernesto (1894). "Sur une formule empirique de M. Pervouchine". Comptes
+/// Rendus Hebdomadaires des Séances de l'Académie des Sciences. 119: 848–849.
+/// https://en.wikipedia.org/wiki/Prime_number_theorem#Approximations_for_the_nth_prime_number
+///
+template <typename T>
+T initialNthPrimeApprox(T x)
+{
+  if (x < 1)
+    return 0;
+  else if (x >= 1 && x < 2)
+    return 2;
+  else if (x >= 2 && x < 3)
+    return 3;
+
+  T logx = std::log(x);
+  T loglogx = std::log(logx);
+  T t = logx + (loglogx / 2);
+
+  if (x > 1600)
+    t += (loglogx / 2) - 1 + (loglogx - 2) / logx;
+  if (x > 1200000)
+    t -= (loglogx * loglogx - 6 * loglogx + 11) / (2 * logx * logx);
+
+  return x * t;
+}
+
 /// Calculate the logarithmic integral using
 /// Ramanujan's formula:
 /// https://en.wikipedia.org/wiki/Logarithmic_integral_function#Series_representation
 ///
-long double li(long double x)
+template <typename T>
+T li(T x)
 {
   if (x <= 1)
     return 0;
 
-  long double gamma = 0.577215664901532860606512090082402431L;
-  long double sum = 0;
-  long double inner_sum = 0;
-  long double factorial = 1;
-  long double p = -1;
-  long double q = 0;
-  long double power2 = 1;
-  long double logx = std::log(x);
+  T gamma = (T) 0.577215664901532860606512090082402431L;
+  T sum = 0;
+  T inner_sum = 0;
+  T factorial = 1;
+  T p = -1;
+  T q = 0;
+  T power2 = 1;
+  T logx = std::log(x);
   int k = 0;
 
-  for (int n = 1; true; n++)
+  // The condition n < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int n = 1; n < 1000; n++)
   {
     p *= -logx;
     factorial *= n;
@@ -60,13 +91,13 @@ long double li(long double x)
     power2 *= 2;
 
     for (; k <= (n - 1) / 2; k++)
-      inner_sum += 1.0L / (2 * k + 1);
+      inner_sum += T(1.0) / (2 * k + 1);
 
     auto old_sum = sum;
     sum += (p / q) * inner_sum;
 
     // Not converging anymore
-    if (std::abs(sum - old_sum) < std::numeric_limits<long double>::epsilon())
+    if (std::abs(sum - old_sum) <= std::numeric_limits<T>::epsilon())
       break;
   }
 
@@ -77,11 +108,12 @@ long double li(long double x)
 /// accurate approximation of the number of primes <= x.
 /// Li(x) > pi(x) for 24 <= x <= ~ 10^316
 ///
-long double Li(long double x)
+template <typename T>
+T Li(T x)
 {
-  long double li2 = 1.045163780117492784844588889194613136L;
+  T li2 = (T) 1.045163780117492784844588889194613136L;
 
-  if (x <= li2)
+  if (x <= 2)
     return 0;
   else
     return li(x) - li2;
@@ -91,27 +123,30 @@ long double Li(long double x)
 /// is a very accurate approximation of the nth prime.
 /// Li^-1(x) < nth_prime(x) for 7 <= x <= 10^316
 ///
-/// This implementation computes Li^-1(x) as the zero of the
-/// function f(z) = Li(z) - x using the Newton–Raphson method.
-/// Note that Li'(z) = 1 / log(z).
-/// https://math.stackexchange.com/a/853192
-///
-/// Newton–Raphson method:
-/// zn+1 = zn - (f(zn) / f'(zn)).
-/// zn+1 = zn - (Li(zn) - x) / (1 / log(zn))
-/// zn+1 = zn - (Li(zn) - x) * log(zn)
-///
-long double Li_inverse(long double x)
+template <typename T>
+T Li_inverse(T x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
 
-  long double t = x * std::log(x);
-  long double old_term = std::numeric_limits<long double>::infinity();
+  T t = initialNthPrimeApprox(x);
+  T old_term = std::numeric_limits<T>::infinity();
 
-  while (true)
+  // The condition i < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int i = 0; i < 10; i++)
   {
-    long double term = (Li(t) - x) * std::log(t);
+    // Halley's method (root-finding algorithm).
+    // https://en.wikipedia.org/wiki/Halley%27s_method
+    // xn+1 = xn - f(xn)/f'(xn) / [1 - f(xn)/f'(xn) * f''(xn)/2*f'(xn)]
+    // f(t) = Li(t) - x. When we solve f(t)=0, we get the result Li^-1(x) = t.
+    // f'(t) = (Li(t) - x)' = Li'(t) = 1 / log(t)
+    // f''(t) = Li''(t) = -1 / (t*log(t)^2)
+    // This simplifies to:
+    // xn+1 = xn - f(xn)*log(xn) / (1 + f(xn) / 2*xn)
+    T delta = Li(t) - x;
+    T term = delta * std::log(t) / (1 + delta / (2 * t));
 
     // Not converging anymore
     if (std::abs(term) >= std::abs(old_term))
@@ -125,6 +160,32 @@ long double Li_inverse(long double x)
 }
 
 #if defined(HAVE_FLOAT128)
+
+/// Calculate an initial nth prime approximation using Cesàro's formula.
+/// Cesàro, Ernesto (1894). "Sur une formule empirique de M. Pervouchine". Comptes
+/// Rendus Hebdomadaires des Séances de l'Académie des Sciences. 119: 848–849.
+/// https://en.wikipedia.org/wiki/Prime_number_theorem#Approximations_for_the_nth_prime_number
+///
+__float128 initialNthPrimeApprox(__float128 x)
+{
+  if (x < 1)
+    return 0;
+  else if (x >= 1 && x < 2)
+    return 2;
+  else if (x >= 2 && x < 3)
+    return 3;
+
+  __float128 logx = logq(x);
+  __float128 loglogx = logq(logx);
+  __float128 t = logx + (loglogx / 2);
+
+  if (x > 1600)
+    t += (loglogx / 2) - 1 + (loglogx - 2) / logx;
+  if (x > 1200000)
+    t -= (loglogx * loglogx - 6 * loglogx + 11) / (2 * logx * logx);
+
+  return x * t;
+}
 
 /// Calculate the logarithmic integral using
 /// Ramanujan's formula:
@@ -145,7 +206,10 @@ __float128 li(__float128 x)
   __float128 logx = logq(x);
   int k = 0;
 
-  for (int n = 1; true; n++)
+  // The condition n < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int n = 1; n < 1000; n++)
   {
     p *= -logx;
     factorial *= n;
@@ -159,7 +223,7 @@ __float128 li(__float128 x)
     sum += (p / q) * inner_sum;
 
     // Not converging anymore
-    if (fabsq(sum - old_sum) < FLT128_EPSILON)
+    if (fabsq(sum - old_sum) <= FLT128_EPSILON)
       break;
   }
 
@@ -174,7 +238,7 @@ __float128 Li(__float128 x)
 {
   __float128 li2 = 1.045163780117492784844588889194613136Q;
 
-  if (x <= li2)
+  if (x <= 2)
     return 0;
   else
     return li(x) - li2;
@@ -184,27 +248,29 @@ __float128 Li(__float128 x)
 /// is a very accurate approximation of the nth prime.
 /// Li^-1(x) < nth_prime(x) for 7 <= x <= 10^316
 ///
-/// This implementation computes Li^-1(x) as the zero of the
-/// function f(z) = Li(z) - x using the Newton–Raphson method.
-/// Note that Li'(z) = 1 / log(z).
-/// https://math.stackexchange.com/a/853192
-///
-/// Newton–Raphson method:
-/// zn+1 = zn - (f(zn) / f'(zn)).
-/// zn+1 = zn - (Li(zn) - x) / (1 / log(zn))
-/// zn+1 = zn - (Li(zn) - x) * log(zn)
-///
 __float128 Li_inverse(__float128 x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
 
-  __float128 t = x * logq(x);
-  __float128 old_term = FLT128_MAX;
+  __float128 t = initialNthPrimeApprox(x);
+  __float128 old_term = HUGE_VALQ;
 
-  while (true)
+  // The condition i < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int i = 0; i < 10; i++)
   {
-    __float128 term = (Li(t) - x) * logq(t);
+    // Halley's method (root-finding algorithm).
+    // https://en.wikipedia.org/wiki/Halley%27s_method
+    // xn+1 = xn - f(xn)/f'(xn) / [1 - f(xn)/f'(xn) * f''(xn)/2*f'(xn)]
+    // f(t) = Li(t) - x. When we solve f(t)=0, we get the result Li^-1(x) = t.
+    // f'(t) = (Li(t) - x)' = Li'(t) = 1 / log(t)
+    // f''(t) = Li''(t) = -1 / (t*log(t)^2)
+    // This simplifies to:
+    // xn+1 = xn - f(xn)*log(xn) / (1 + f(xn) / 2*xn)
+    __float128 delta = Li(t) - x;
+    __float128 term = delta * logq(t) / (1 + delta / (2 * t));
 
     // Not converging anymore
     if (fabsq(term) >= fabsq(old_term))
@@ -219,6 +285,18 @@ __float128 Li_inverse(__float128 x)
 
 #endif
 
+template <typename FLOAT, typename T>
+T Li_inverse_overflow_check(T x)
+{
+  FLOAT res = Li_inverse((FLOAT) x);
+
+  // Prevent integer overflow
+  if (res > (FLOAT) std::numeric_limits<T>::max())
+    return std::numeric_limits<T>::max();
+  else
+    return (T) res;
+}
+
 } // namespace
 
 namespace primecount {
@@ -226,34 +304,31 @@ namespace primecount {
 int64_t Li(int64_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
+  // The accuracy of our implementation depends on the precision (number
+  // of bits) of the long double type and the accuracy of the math
+  // functions from the libc. Since there are many different libc with
+  // varying accuracy, it is impossible to know the exact threshold for
+  // when we should switch to __float128. But 1e14 seems to work well in
+  // practice.
+  if (x > 1e14)
     return (int64_t) ::Li((__float128) x);
 #endif
-  return (int64_t) ::Li((long double) x);
+  if (x > 1e8)
+    return (int64_t) ::Li((long double) x);
+  else
+    return (int64_t) ::Li((double) x);
 }
 
 int64_t Li_inverse(int64_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
-  {
-    __float128 res = ::Li_inverse((__float128) x);
-    if (res > (__float128) std::numeric_limits<int64_t>::max())
-      return std::numeric_limits<int64_t>::max();
-    else
-      return (int64_t) res;
-  }
+  if (x > 1e14)
+    return Li_inverse_overflow_check<__float128>(x);
 #endif
-
-  long double res = ::Li_inverse((long double) x);
-  if (res > (long double) std::numeric_limits<int64_t>::max())
-    return std::numeric_limits<int64_t>::max();
+  if (x > 1e8)
+    return Li_inverse_overflow_check<long double>(x);
   else
-    return (int64_t) res;
+    return Li_inverse_overflow_check<double>(x);
 }
 
 #ifdef HAVE_INT128_T
@@ -261,34 +336,25 @@ int64_t Li_inverse(int64_t x)
 int128_t Li(int128_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
+  if (x > 1e14)
     return (int128_t) ::Li((__float128) x);
 #endif
-  return (int128_t) ::Li((long double) x);
+  if (x > 1e8)
+    return (int128_t) ::Li((long double) x);
+  else
+    return (int128_t) ::Li((double) x);
 }
 
 int128_t Li_inverse(int128_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
-  {
-    __float128 res = ::Li_inverse((__float128) x);
-    if (res > (__float128) std::numeric_limits<int128_t>::max())
-      return std::numeric_limits<int128_t>::max();
-    else
-      return (int128_t) res;
-  }
+  if (x > 1e14)
+    return Li_inverse_overflow_check<__float128>(x);
 #endif
-
-  long double res = ::Li_inverse((long double) x);
-  if (res > (long double) std::numeric_limits<int128_t>::max())
-    return std::numeric_limits<int128_t>::max();
+  if (x > 1e8)
+    return Li_inverse_overflow_check<long double>(x);
   else
-    return (int128_t) res;
+    return Li_inverse_overflow_check<double>(x);
 }
 
 #endif

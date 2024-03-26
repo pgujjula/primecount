@@ -170,67 +170,27 @@ const primesieve::Array<long double, 128> zeta =
 /// Rendus Hebdomadaires des Séances de l'Académie des Sciences. 119: 848–849.
 /// https://en.wikipedia.org/wiki/Prime_number_theorem#Approximations_for_the_nth_prime_number
 ///
-long double initialNthPrimeApprox(long double x)
+template <typename T>
+T initialNthPrimeApprox(T x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
+  else if (x >= 1 && x < 2)
+    return 2;
+  else if (x >= 2 && x < 3)
+    return 3;
 
-  long double logx = std::log(x);
-  long double t = logx;
+  T logx = std::log(x);
+  T loglogx = std::log(logx);
+  T t = logx + (loglogx / 2);
 
-  if (x > /* e = */ 2.719)
-  {
-    long double loglogx = std::log(logx);
-    t += 0.5 * loglogx;
-
-    if (x > 1600)
-      t += 0.5 * loglogx - 1.0 + (loglogx - 2.0) / logx;
-    if (x > 1200000)
-      t -= (loglogx * loglogx - 6.0 * loglogx + 11.0) / (2.0 * logx * logx);
-  }
+  if (x > 1600)
+    t += (loglogx / 2) - 1 + (loglogx - 2) / logx;
+  if (x > 1200000)
+    t -= (loglogx * loglogx - 6 * loglogx + 11) / (2 * logx * logx);
 
   return x * t;
 }
-
-/// Calculate the derivative of the Riemann R function.
-/// RiemannR'(x) = 1/x * \sum_{k=1}^{∞} ln(x)^(k-1) / (zeta(k + 1) * k!)
-///
-long double RiemannR_prime(long double x)
-{
-  if (x < 0.1)
-    return 0;
-
-  long double epsilon = std::numeric_limits<long double>::epsilon();
-
-  // RiemannR_prime(1) = NaN.
-  // Hence we return RiemannR_prime(1.0000000000000001).
-  // Required because: sum / log(1) = 0 / 0.
-  if (std::abs(x - 1.0) < epsilon)
-    return 0.60792710185402643042L;
-
-  long double sum = 0;
-  long double old_sum = -1;
-  long double term = 1;
-  long double logx = std::log(x);
-
-  for (unsigned k = 1; std::abs(old_sum - sum) >= epsilon; k++)
-  {
-    term *= logx / k;
-    old_sum = sum;
-
-    if (k + 1 < zeta.size())
-      sum += term / zeta[k + 1];
-    else
-      // For k >= 127, approximate zeta(k + 1) by 1
-      sum += term;
-  }
-
-  return sum / (x * logx);
-}
-
-} // namespace
-
-namespace primesieve {
 
 /// Calculate the Riemann R function which is a very accurate
 /// approximation of the number of primes below x.
@@ -238,27 +198,34 @@ namespace primesieve {
 /// The calculation is done with the Gram series:
 /// RiemannR(x) = 1 + \sum_{k=1}^{∞} ln(x)^k / (zeta(k + 1) * k * k!)
 ///
-long double RiemannR(long double x)
+template <typename T>
+T RiemannR(T x)
 {
-  if (x < 0.1)
+  if (x < T(1e-5))
     return 0;
 
-  long double epsilon = std::numeric_limits<long double>::epsilon();
-  long double sum = 1;
-  long double old_sum = -1;
-  long double term = 1;
-  long double logx = std::log(x);
+  T epsilon = std::numeric_limits<T>::epsilon();
+  T sum = 1;
+  T term = 1;
+  T logx = std::log(x);
 
-  for (unsigned k = 1; std::abs(old_sum - sum) >= epsilon; k++)
+  // The condition k < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (unsigned k = 1; k < 1000; k++)
   {
     term *= logx / k;
-    old_sum = sum;
+    T old_sum = sum;
 
     if (k + 1 < zeta.size())
-      sum += term / (zeta[k + 1] * k);
+      sum += term / (T(zeta[k + 1]) * k);
     else
       // For k >= 127, approximate zeta(k + 1) by 1
       sum += term / k;
+
+    // Not converging anymore
+    if (std::abs(sum - old_sum) <= epsilon)
+      break;
   }
 
   return sum;
@@ -266,25 +233,29 @@ long double RiemannR(long double x)
 
 /// Calculate the inverse Riemann R function which is a very
 /// accurate approximation of the nth prime.
-/// This implementation computes RiemannR^-1(x) as the zero of the
-/// function f(z) = RiemannR(z) - x using the Newton–Raphson method.
-/// https://math.stackexchange.com/a/853192
+/// This implementation computes RiemannR^-1(x) = t as the zero of the
+/// function f(t) = RiemannR(t) - x using the Newton–Raphson method.
+/// https://en.wikipedia.org/wiki/Newton%27s_method
 ///
-/// Newton–Raphson method:
-/// zn+1 = zn - (f(zn) / f'(zn)).
-/// zn+1 = zn - (RiemannR(zn) - x) / RiemannR'(zn)
-///
-long double RiemannR_inverse(long double x)
+template <typename T>
+T RiemannR_inverse(T x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
 
-  long double t = initialNthPrimeApprox(x);
-  long double old_term = std::numeric_limits<long double>::infinity();
+  T t = initialNthPrimeApprox(x);
+  T old_term = std::numeric_limits<T>::infinity();
 
-  while (true)
+  // The condition i < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int i = 0; i < 10; i++)
   {
-    long double term = (RiemannR(t) - x) / RiemannR_prime(t);
+    // term = f(t) / f'(t)
+    // f(t) = RiemannR(t) - x
+    // RiemannR(t) ~ li(t), hence f'(t) = li'(t) = 1 / log(t)
+    // term = (RiemannR(t) - x) / li'(t) = (RiemannR(t) - x) * log(t)
+    T term = (RiemannR(t) - x) * std::log(t);
 
     // Not converging anymore
     if (std::abs(term) >= std::abs(old_term))
@@ -295,6 +266,26 @@ long double RiemannR_inverse(long double x)
   }
 
   return t;
+}
+
+} // namespace
+
+namespace primesieve {
+
+long double RiemannR(long double x)
+{
+  if (x <= 1e8)
+    return ::RiemannR((double) x);
+  else
+    return ::RiemannR((long double) x);
+}
+
+long double RiemannR_inverse(long double x)
+{
+  if (x <= 1e8)
+    return ::RiemannR_inverse((double) x);
+  else
+    return ::RiemannR_inverse((long double) x);
 }
 
 /// primePiApprox(x) is a very accurate approximation of PrimePi(x)

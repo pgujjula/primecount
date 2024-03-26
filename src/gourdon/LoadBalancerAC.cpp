@@ -18,7 +18,6 @@
 #include <primecount-config.hpp>
 #include <primecount-internal.hpp>
 #include <imath.hpp>
-#include <min.hpp>
 
 #include <stdint.h>
 #include <algorithm>
@@ -28,10 +27,11 @@
 namespace {
 
 constexpr int64_t numbers_per_byte = primecount::SegmentedPiTable::numbers_per_byte();
-
-// Minimum segment size = 1 KiB
-constexpr int64_t min_segment_size = (1 << 10) * numbers_per_byte;
 constexpr int64_t l2_segment_size = L2_CACHE_SIZE * numbers_per_byte;
+
+// Minimum segment size = 512 bytes.
+// This size performs well on my AMD EPYC 2 near 1e16.
+constexpr int64_t min_segment_size = (1 << 9) * numbers_per_byte;
 
 } // namespace
 
@@ -42,100 +42,98 @@ LoadBalancerAC::LoadBalancerAC(int64_t sqrtx,
                                int threads,
                                bool is_print) :
   sqrtx_(sqrtx),
-  x14_(isqrt(sqrtx)),
   y_(y),
   threads_(threads),
   is_print_(is_print)
 {
   lock_.init(threads);
 
+  // The default segment size is x^(1/4). This
+  // is tiny, will fit into the CPU's cache.
+  int64_t x14 = isqrt(sqrtx);
+  segment_size_ = x14;
+
   // When a single thread is used (and printing is
   // disabled) we can use a segment size larger
   // than x^(1/4) because load balancing is only
   // useful for multi-threading.
   if (threads == 1 && !is_print)
-    segment_size_ = std::max(x14_, l2_segment_size);
-  else
-  {
-    // The default segment size is x^(1/4). This
-    // is tiny, will fit into the CPU's cache.
-    segment_size_ = x14_;
+    segment_size_ = std::max(x14, l2_segment_size);
 
-    // Most special leaves are below y (~ x^(1/3) * log(x)).
-    // We make sure this interval is evenly distributed
-    // amongst all threads by using a small segment size.
-    // Above y we use a larger segment size but still ensure
-    // that it fits into the CPU's cache.
-    if (y_ < sqrtx_)
-    {
-      int64_t max_segment_size = (sqrtx_ - y_) / (threads_ * 8);
-      large_segment_size_ = segment_size_ * 16;
-      large_segment_size_ = min3(large_segment_size_, l2_segment_size, max_segment_size);
-      large_segment_size_ = std::max(segment_size_, large_segment_size_);
-    }
-  }
-
-  validate_segment_sizes();
-  compute_total_segments();
-  print_status();
-}
-
-bool LoadBalancerAC::get_work(int64_t& low, int64_t& high)
-{
-  LockGuard lockGuard(lock_);
-
-  if (low_ >= sqrtx_)
-    return false;
+  segment_size_ = std::max(min_segment_size, segment_size_);
+  segment_size_ = SegmentedPiTable::get_segment_size(segment_size_);
+  total_segments_ = ceil_div(sqrtx, segment_size_);
 
   // Most special leaves are below y (~ x^(1/3) * log(x)).
   // We make sure this interval is evenly distributed
   // amongst all threads by using a small segment size.
   // Above y we use a larger segment size but still ensure
   // that it fits into the CPU's cache.
-  if (low_ > y_)
-    segment_size_ = large_segment_size_;
+  max_segment_size_ = std::max(l2_segment_size, segment_size_);
+
+  if (is_print_)
+    print_status(get_time());
+}
+
+bool LoadBalancerAC::get_work(int64_t& low,
+                              int64_t& high,
+                              double& thread_secs)
+{
+  double current_time = get_time();
+  thread_secs = current_time - thread_secs;
+
+  LockGuard lockGuard(lock_);
+
+  if (low_ >= sqrtx_)
+    return false;
+  if (low_ == 0)
+    start_time_ = current_time;
+
+  double total_secs = current_time - start_time_;
+  double increase_threshold = in_between(0.01, total_secs / 100, 1.0);
+  int64_t remaining_dist = sqrtx_ - low_;
+  int64_t thread_segment_size = high - low;
+
+  // Most special leaves are below y (~ x^(1/3) * log(x)).
+  // We make sure this interval is evenly distributed
+  // amongst all threads by using a small segment size.
+  // Above y we increase the segment size by 2x if the
+  // thread runtime is close to 0.
+  if (low_ > y_ &&
+      thread_secs < increase_threshold &&
+      thread_segment_size == segment_size_ &&
+      segment_size_ * (threads_ * 4) < remaining_dist)
+  {
+    int64_t increase_factor = 2;
+    segment_size_ = std::min(segment_size_ * increase_factor, max_segment_size_);
+    segment_size_ = SegmentedPiTable::get_segment_size(segment_size_);
+    total_segments_ = segment_nr_ + ceil_div(remaining_dist, segment_size_);
+  }
+
+  if (is_print_)
+    print_status(current_time);
 
   low = low_;
   high = low + segment_size_;
   high = std::min(high, sqrtx_);
   low_ = high;
   segment_nr_++;
-  print_status();
 
   return low < sqrtx_;
 }
 
-void LoadBalancerAC::validate_segment_sizes()
+void LoadBalancerAC::print_status(double current_time)
 {
-  segment_size_ = std::max(min_segment_size, segment_size_);
-  large_segment_size_ = std::max(segment_size_, large_segment_size_);
-  segment_size_ = SegmentedPiTable::get_segment_size(segment_size_);
-  large_segment_size_ = SegmentedPiTable::get_segment_size(large_segment_size_);
-}
+  double threshold = 0.1;
 
-void LoadBalancerAC::compute_total_segments()
-{
-  int64_t small_segments = ceil_div(y_, segment_size_);
-  int64_t threshold = std::min(small_segments * segment_size_, sqrtx_);
-  int64_t large_segments = ceil_div(sqrtx_ - threshold, large_segment_size_);
-  total_segments_ = small_segments + large_segments;
-}
-
-void LoadBalancerAC::print_status()
-{
-  if (is_print_)
+  if (current_time - print_time_ >= threshold)
   {
-    double time = get_time();
-    double old = time_;
-    double threshold = 0.1;
-
-    if ((time - old) >= threshold)
-    {
-      time_ = time;
-      std::ostringstream status;
-      status << "\rSegments: " << segment_nr_ << '/' << total_segments_;
-      std::cout << status.str() << std::flush;
-    }
+    print_time_ = current_time;
+    std::ostringstream status;
+    // Clear line because total_segments_ may become smaller
+    status << "\r                                    "
+            << "\rSegments: " << segment_nr_ << '/' << total_segments_;
+    std::cout << status.str() << std::flush;
   }
 }
 

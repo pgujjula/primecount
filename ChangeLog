@@ -1,5 +1,21 @@
-Changes in primecount-7.11, 2024-02-29
+Changes in primecount-7.12, 2024-03-24
 
+* LoadBalancerAC.cpp: Improve thread load balancing.
+* LogarithmicIntegral.cpp: Fix infinite loop on Linux i386 #66.
+* RiemannR.cpp: Fix infinite loop on Linux i386 #66.
+* RiemannR.cpp: Faster and simpler RiemannR_inverse(x).
+* test/Li.cpp: Add more tests.
+* test/Riemann_R.cpp: Add more tests.
+* CMakeLists.txt: Disable WITH_DIV32 by default, both GCC & Clang
+  have now learned to optimize integer division.
+* fast_div.hpp: Get rid of make_smaller<T>::type hack.
+
+Changes in primecount-7.11, 2024-03-11
+
+* CMakeLists.txt: Detect Apple Silicon CPUs and disable libdivide since
+  Apple Silicon CPUs have very fast integer division instructions.
+* test/iroot.cpp: Fix musl libc issue.
+* test/Li.cpp: Speed up test.
 * Faster RiemannR(x) and RiemannR_inverse(x) implementations.
   https://github.com/kimwalisch/primesieve/pull/144
 * Renamed option --Ri to: -R or --RiemannR.
@@ -7,7 +23,7 @@ Changes in primecount-7.11, 2024-02-29
 * CmdOptions.cpp: Detect incompatible options.
 * PiTable.cpp: Increase cache size to 2 KiB.
 * Improve status output on Windows.
-* Updated to latest primesieve-12.0 library.
+* Updated to latest primesieve-12.1 library.
 
 Changes in primecount-7.10, 2024-01-08
 

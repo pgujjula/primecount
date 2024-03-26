@@ -181,62 +181,26 @@ const primecount::Array<long double, 128> zeta =
 /// Rendus Hebdomadaires des Séances de l'Académie des Sciences. 119: 848–849.
 /// https://en.wikipedia.org/wiki/Prime_number_theorem#Approximations_for_the_nth_prime_number
 ///
-long double initialNthPrimeApprox(long double x)
+template <typename T>
+T initialNthPrimeApprox(T x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
+  else if (x >= 1 && x < 2)
+    return 2;
+  else if (x >= 2 && x < 3)
+    return 3;
 
-  long double logx = std::log(x);
-  long double t = logx;
+  T logx = std::log(x);
+  T loglogx = std::log(logx);
+  T t = logx + (loglogx / 2);
 
-  if (x > /* e = */ 2.719)
-  {
-    long double loglogx = std::log(logx);
-    t += 0.5 * loglogx;
-
-    if (x > 1600)
-      t += 0.5 * loglogx - 1.0 + (loglogx - 2.0) / logx;
-    if (x > 1200000)
-      t -= (loglogx * loglogx - 6.0 * loglogx + 11.0) / (2.0 * logx * logx);
-  }
+  if (x > 1600)
+    t += (loglogx / 2) - 1 + (loglogx - 2) / logx;
+  if (x > 1200000)
+    t -= (loglogx * loglogx - 6 * loglogx + 11) / (2 * logx * logx);
 
   return x * t;
-}
-
-/// Calculate the derivative of the Riemann R function.
-/// RiemannR'(x) = 1/x * \sum_{k=1}^{∞} ln(x)^(k-1) / (zeta(k + 1) * k!)
-///
-long double RiemannR_prime(long double x)
-{
-  if (x < 0.1)
-    return 0;
-
-  long double epsilon = std::numeric_limits<long double>::epsilon();
-
-  // RiemannR_prime(1) = NaN.
-  // Hence we return RiemannR_prime(1.0000000000000001).
-  // Required because: sum / log(1) = 0 / 0.
-  if (std::abs(x - 1.0) < epsilon)
-    return 0.60792710185402643042L;
-
-  long double sum = 0;
-  long double old_sum = -1;
-  long double term = 1;
-  long double logx = std::log(x);
-
-  for (unsigned k = 1; std::abs(old_sum - sum) >= epsilon; k++)
-  {
-    term *= logx / k;
-    old_sum = sum;
-
-    if (k + 1 < zeta.size())
-      sum += term / zeta[k + 1];
-    else
-      // For k >= 127, approximate zeta(k + 1) by 1
-      sum += term;
-  }
-
-  return sum / (x * logx);
 }
 
 /// Calculate the Riemann R function which is a very accurate
@@ -245,27 +209,34 @@ long double RiemannR_prime(long double x)
 /// The calculation is done with the Gram series:
 /// RiemannR(x) = 1 + \sum_{k=1}^{∞} ln(x)^k / (zeta(k + 1) * k * k!)
 ///
-long double RiemannR(long double x)
+template <typename T>
+T RiemannR(T x)
 {
-  if (x < 0.1)
+  if (x < T(1e-5))
     return 0;
 
-  long double epsilon = std::numeric_limits<long double>::epsilon();
-  long double sum = 1;
-  long double old_sum = -1;
-  long double term = 1;
-  long double logx = std::log(x);
+  T epsilon = std::numeric_limits<T>::epsilon();
+  T sum = 1;
+  T term = 1;
+  T logx = std::log(x);
 
-  for (unsigned k = 1; std::abs(old_sum - sum) >= epsilon; k++)
+  // The condition k < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (unsigned k = 1; k < 1000; k++)
   {
     term *= logx / k;
-    old_sum = sum;
+    T old_sum = sum;
 
     if (k + 1 < zeta.size())
-      sum += term / (zeta[k + 1] * k);
+      sum += term / (T(zeta[k + 1]) * k);
     else
       // For k >= 127, approximate zeta(k + 1) by 1
       sum += term / k;
+
+    // Not converging anymore
+    if (std::abs(sum - old_sum) <= epsilon)
+      break;
   }
 
   return sum;
@@ -273,25 +244,29 @@ long double RiemannR(long double x)
 
 /// Calculate the inverse Riemann R function which is a very
 /// accurate approximation of the nth prime.
-/// This implementation computes RiemannR^-1(x) as the zero of the
-/// function f(z) = RiemannR(z) - x using the Newton–Raphson method.
-/// https://math.stackexchange.com/a/853192
+/// This implementation computes RiemannR^-1(x) = t as the zero of the
+/// function f(t) = RiemannR(t) - x using the Newton–Raphson method.
+/// https://en.wikipedia.org/wiki/Newton%27s_method
 ///
-/// Newton–Raphson method:
-/// zn+1 = zn - (f(zn) / f'(zn)).
-/// zn+1 = zn - (RiemannR(zn) - x) / RiemannR'(zn)
-///
-long double RiemannR_inverse(long double x)
+template <typename T>
+T RiemannR_inverse(T x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
 
-  long double t = initialNthPrimeApprox(x);
-  long double old_term = std::numeric_limits<long double>::infinity();
+  T t = initialNthPrimeApprox(x);
+  T old_term = std::numeric_limits<T>::infinity();
 
-  while (true)
+  // The condition i < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int i = 0; i < 10; i++)
   {
-    long double term = (RiemannR(t) - x) / RiemannR_prime(t);
+    // term = f(t) / f'(t)
+    // f(t) = RiemannR(t) - x
+    // RiemannR(t) ~ li(t), hence f'(t) = li'(t) = 1 / log(t)
+    // term = (RiemannR(t) - x) / li'(t) = (RiemannR(t) - x) * log(t)
+    T term = (RiemannR(t) - x) * std::log(t);
 
     // Not converging anymore
     if (std::abs(term) >= std::abs(old_term))
@@ -443,38 +418,30 @@ const primecount::Array<__float128, 128> zeta_f128 =
   1.000000000000000000000000000000000000006Q
 };
 
-/// Calculate the derivative of the Riemann R function.
-/// RiemannR'(x) = 1/x * \sum_{k=1}^{∞} ln(x)^(k-1) / (zeta(k + 1) * k!)
+/// Calculate an initial nth prime approximation using Cesàro's formula.
+/// Cesàro, Ernesto (1894). "Sur une formule empirique de M. Pervouchine". Comptes
+/// Rendus Hebdomadaires des Séances de l'Académie des Sciences. 119: 848–849.
+/// https://en.wikipedia.org/wiki/Prime_number_theorem#Approximations_for_the_nth_prime_number
 ///
-__float128 RiemannR_prime(__float128 x)
+__float128 initialNthPrimeApprox(__float128 x)
 {
-  if (x < 0.1)
+  if (x < 1)
     return 0;
+  else if (x >= 1 && x < 2)
+    return 2;
+  else if (x >= 2 && x < 3)
+    return 3;
 
-  // RiemannR_prime(1) = NaN.
-  // Hence we return RiemannR_prime(1.0000000000000001).
-  // Required because: sum / log(1) = 0 / 0.
-  if (fabsq(x - 1.0) < FLT128_EPSILON)
-    return 0.60792710185402643042Q;
-
-  __float128 sum = 0;
-  __float128 old_sum = -1;
-  __float128 term = 1;
   __float128 logx = logq(x);
+  __float128 loglogx = logq(logx);
+  __float128 t = logx + (loglogx / 2);
 
-  for (unsigned k = 1; fabsq(old_sum - sum) >= FLT128_EPSILON; k++)
-  {
-    term *= logx / k;
-    old_sum = sum;
+  if (x > 1600)
+    t += (loglogx / 2) - 1 + (loglogx - 2) / logx;
+  if (x > 1200000)
+    t -= (loglogx * loglogx - 6 * loglogx + 11) / (2 * logx * logx);
 
-    if (k + 1 < zeta_f128.size())
-      sum += term / zeta_f128[k + 1];
-    else
-      // For k >= 127, approximate zeta(k + 1) by 1
-      sum += term;
-  }
-
-  return sum / (x * logx);
+  return x * t;
 }
 
 /// Calculate the Riemann R function which is a very accurate
@@ -485,24 +452,30 @@ __float128 RiemannR_prime(__float128 x)
 ///
 __float128 RiemannR(__float128 x)
 {
-  if (x < 0.1)
+  if (x < 1e-5)
     return 0;
 
   __float128 sum = 1;
-  __float128 old_sum = -1;
   __float128 term = 1;
   __float128 logx = logq(x);
 
-  for (unsigned k = 1; fabsq(old_sum - sum) >= FLT128_EPSILON; k++)
+  // The condition k < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (unsigned k = 1; k < 1000; k++)
   {
     term *= logx / k;
-    old_sum = sum;
+    __float128 old_sum = sum;
 
     if (k + 1 < zeta_f128.size())
       sum += term / (zeta_f128[k + 1] * k);
     else
       // For k >= 127, approximate zeta(k + 1) by 1
       sum += term / k;
+
+    // Not converging anymore
+    if (fabsq(sum - old_sum) <= FLT128_EPSILON)
+      break;
   }
 
   return sum;
@@ -510,25 +483,28 @@ __float128 RiemannR(__float128 x)
 
 /// Calculate the inverse Riemann R function which is a very
 /// accurate approximation of the nth prime.
-/// This implementation computes RiemannR^-1(x) as the zero of the
-/// function f(z) = RiemannR(z) - x using the Newton–Raphson method.
-/// https://math.stackexchange.com/a/853192
-///
-/// Newton–Raphson method:
-/// zn+1 = zn - (f(zn) / f'(zn)).
-/// zn+1 = zn - (RiemannR(zn) - x) / RiemannR'(zn)
+/// This implementation computes RiemannR^-1(x) = t as the zero of the
+/// function f(t) = RiemannR(t) - x using the Newton–Raphson method.
+/// https://en.wikipedia.org/wiki/Newton%27s_method
 ///
 __float128 RiemannR_inverse(__float128 x)
 {
-  if (x < 2)
+  if (x < 1)
     return 0;
 
-  __float128 t = (__float128) initialNthPrimeApprox((long double) x);
+  __float128 t = initialNthPrimeApprox(x);
   __float128 old_term = HUGE_VALQ;
 
-  while (true)
+  // The condition i < ITERS is required in case the computation
+  // does not converge. This happened on Linux i386 where
+  // the precision of the libc math functions is very limited.
+  for (int i = 0; i < 10; i++)
   {
-    __float128 term = (RiemannR(t) - x) / RiemannR_prime(t);
+    // term = f(t) / f'(t)
+    // f(t) = RiemannR(t) - x
+    // RiemannR(t) ~ li(t), hence f'(t) = li'(t) = 1 / log(t)
+    // term = (RiemannR(t) - x) / li'(t) = (RiemannR(t) - x) * log(t)
+    __float128 term = (RiemannR(t) - x) * logq(t);
 
     // Not converging anymore
     if (fabsq(term) >= fabsq(old_term))
@@ -543,6 +519,18 @@ __float128 RiemannR_inverse(__float128 x)
 
 #endif
 
+template <typename FLOAT, typename T>
+T RiemannR_inverse_overflow_check(T x)
+{
+  FLOAT res = RiemannR_inverse((FLOAT) x);
+
+  // Prevent integer overflow
+  if (res > (FLOAT) std::numeric_limits<T>::max())
+    return std::numeric_limits<T>::max();
+  else
+    return (T) res;
+}
+
 } // namespace
 
 namespace primecount {
@@ -550,34 +538,31 @@ namespace primecount {
 int64_t RiemannR(int64_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
+  // The accuracy of our implementation depends on the precision (number
+  // of bits) of the long double type and the accuracy of the math
+  // functions from the libc. Since there are many different libc with
+  // varying accuracy, it is impossible to know the exact threshold for
+  // when we should switch to __float128. But 1e14 seems to work well in
+  // practice.
+  if (x > 1e14)
     return (int64_t) ::RiemannR((__float128) x);
 #endif
-  return (int64_t) ::RiemannR((long double) x);
+  if (x > 1e8)
+    return (int64_t) ::RiemannR((long double) x);
+  else
+    return (int64_t) ::RiemannR((double) x);
 }
 
 int64_t RiemannR_inverse(int64_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
-  {
-    __float128 res = ::RiemannR_inverse((__float128) x);
-    if (res > (__float128) std::numeric_limits<int64_t>::max())
-      return std::numeric_limits<int64_t>::max();
-    else
-      return (int64_t) res;
-  }
+  if (x > 1e14)
+    return RiemannR_inverse_overflow_check<__float128>(x);
 #endif
-
-  long double res = ::RiemannR_inverse((long double) x);
-  if (res > (long double) std::numeric_limits<int64_t>::max())
-    return std::numeric_limits<int64_t>::max();
+  if (x > 1e8)
+    return RiemannR_inverse_overflow_check<long double>(x);
   else
-    return (int64_t) res;
+    return RiemannR_inverse_overflow_check<double>(x);
 }
 
 #ifdef HAVE_INT128_T
@@ -585,34 +570,25 @@ int64_t RiemannR_inverse(int64_t x)
 int128_t RiemannR(int128_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
+  if (x > 1e14)
     return (int128_t) ::RiemannR((__float128) x);
 #endif
-  return (int128_t) ::RiemannR((long double) x);
+  if (x > 1e8)
+    return (int128_t) ::RiemannR((long double) x);
+  else
+    return (int128_t) ::RiemannR((double) x);
 }
 
 int128_t RiemannR_inverse(int128_t x)
 {
 #if defined(HAVE_FLOAT128)
-  double long_double_mantissa_bits = std::numeric_limits<long double>::digits;
-
-  if (x > 1e10 && std::log2(x) >= long_double_mantissa_bits / 1.35)
-  {
-    __float128 res = ::RiemannR_inverse((__float128) x);
-    if (res > (__float128) std::numeric_limits<int128_t>::max())
-      return std::numeric_limits<int128_t>::max();
-    else
-      return (int128_t) res;
-  }
+  if (x > 1e14)
+    return RiemannR_inverse_overflow_check<__float128>(x);
 #endif
-
-  long double res = ::RiemannR_inverse((long double) x);
-  if (res > (long double) std::numeric_limits<int128_t>::max())
-    return std::numeric_limits<int128_t>::max();
+  if (x > 1e8)
+    return RiemannR_inverse_overflow_check<long double>(x);
   else
-    return (int128_t) res;
+    return RiemannR_inverse_overflow_check<double>(x);
 }
 
 #endif

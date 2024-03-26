@@ -2,7 +2,7 @@
 /// @file  fast_div.cpp
 /// @brief Test fast_div(x, y) function
 ///
-/// Copyright (C) 2020 Kim Walisch, <kim.walisch@gmail.com>
+/// Copyright (C) 2024 Kim Walisch, <kim.walisch@gmail.com>
 ///
 /// This file is distributed under the BSD License. See the COPYING
 /// file in the top level directory.
@@ -19,28 +19,6 @@
 #include <type_traits>
 
 using namespace primecount;
-
-static_assert(std::is_same<make_smaller<int32_t>::type, uint32_t>::value,
-              "make_smaller<int32_t>::type != uint32_t");
-
-#if defined(ENABLE_DIV32)
-
-static_assert(std::is_same<make_smaller<uint64_t>::type, uint32_t>::value,
-              "make_smaller<uint64_t>::type != uint32_t");
-
-#else
-
-static_assert(std::is_same<make_smaller<uint64_t>::type, uint64_t>::value,
-              "make_smaller<uint64_t>::type != uint64_t");
-
-#endif
-
-#ifdef HAVE_INT128_T
-
-static_assert(std::is_same<make_smaller<int128_t>::type, uint64_t>::value,
-              "make_smaller<int128_t>::type != uint64_t");
-
-#endif
 
 void check(bool OK)
 {
